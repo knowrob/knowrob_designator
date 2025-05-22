@@ -27,7 +27,17 @@ class DesignatorParser:
     # Map CRAM action types to SOMA action types
     action_type_map = {
             "Transporting": "http://www.ease-crc.org/ont/SOMA.owl#Transporting",
-            "Manipulating": "http://www.ease-crc.org/ont/SOMA.owl#Manipulating",
+            "MoveTorsoAction": "http://www.ease-crc.org/ont/SOMA.owl#Positioning",
+            "ParkArmsAction": "http://www.ease-crc.org/ont/SOMA.owl#ParkingArms",
+            "PickUpAction": "http://www.ease-crc.org/ont/SOMA.owl#PickingUp",
+            "PlaceAction": "http://www.ease-crc.org/ont/SOMA.owl#Placing"
+            # Add more mappings as needed
+     }
+    
+    # Map CRAM object types to SOMA object types
+    object_type_map = {
+            "Milk": "http://www.ease-crc.org/ont/SOMA.owl#Milk",
+            "Table": "http://www.ease-crc.org/ont/SOMA.owl#Table",
             # Add more mappings as needed
      }
     

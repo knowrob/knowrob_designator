@@ -5,6 +5,7 @@ import json
 import uuid
 from std_msgs.msg import String
 import actionlib
+from threading import Lock
 
 # Import all designator message types
 from knowrob_designator.msg import (
@@ -28,6 +29,10 @@ print_triples = True
 class DesignatorLoggerNode:
     def __init__(self):
         rospy.init_node('designator_logger_node')
+        
+        # Concurrency control
+        self.lock = Lock()
+        self.states = {}
 
         # Initialize subscribers for each message type
         rospy.Subscriber('/knowrob/designator/push_object_designator', PushObjectDesignator, self.handle_push_object_designator)
@@ -134,8 +139,26 @@ class DesignatorLoggerNode:
             for s, p, o in triples:
                 to_print += f"{s} {p} {o}\n"
             rospy.loginfo(to_print)
+        
+        # Mark start and buffer any early finish
+        with self.lock:
+            st = self.states.setdefault(msg.designator_id, {})
+            st['resolve_started'] = True
+            finish_msg = st.pop('resolve_finish_msg', None)
+            if finish_msg:
+                rospy.logwarn(f"ResolveStart came after ResolveFinished for {msg.designator_id}, processing")
+                self._actually_handle_resolve_finished(finish_msg)
 
     def handle_resolve_finished(self, msg):
+        with self.lock:
+            st = self.states.setdefault(msg.resolved_from_id, {})
+            if not st.get('resolve_started', False):
+                st['resolve_finish_msg'] = msg
+                rospy.logwarn(f"ResolveFinished came early for {msg.designator_id}, buffering")
+                return
+        self._actually_handle_resolve_finished(msg)
+
+    def _actually_handle_resolve_finished(self, msg):
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"[ResolveStart] Processing Action designator resolution for: {msg.designator_id} from {getattr(msg, 'resolved_from_id', None)}")
         designator_json = json.loads(msg.json_designator)
@@ -196,13 +219,30 @@ class DesignatorLoggerNode:
             to_print += f"Execution start triples for {msg.designator_id}:\n"
             for s, p, o in triples:
                 to_print += f"{s} {p} {o}\n"
-            rospy.loginfo(to_print)              
+            rospy.loginfo(to_print)
+        # Mark start and buffer any early finish
+        with self.lock:
+            st = self.states.setdefault(msg.designator_id, {})
+            st['exec_started'] = True
+            finish_msg = st.pop('exec_finish_msg', None)
+            if finish_msg:
+                rospy.logwarn(f"ExecStart came after ExecFinished for {msg.designator_id}, processing")
+                self._actually_handle_exec_finished(finish_msg)          
             
     def handle_exec_finished(self, msg):
+        with self.lock:
+            st = self.states.setdefault(msg.designator_id, {})
+            if not st.get('exec_started', False):
+                st['exec_finish_msg'] = msg
+                rospy.logwarn(f"ExecFinished came early for {msg.designator_id}, buffering")
+                return
+        self._actually_handle_exec_finished(msg)    
+            
+    def _actually_handle_exec_finished(self, msg):
         # TODO: How do i add the end time?
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"Execution Finished: {msg.designator_id}")
-        
+            
     def execute_query_incremental(self, goal):
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"Query Incremental: {goal.query}")
