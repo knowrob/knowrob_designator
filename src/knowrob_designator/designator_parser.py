@@ -4,10 +4,10 @@ from typing import List, Tuple, Optional, Dict, Any, Literal
 class DesignatorParser:
     # Define the prefixes
     PREFIXES = {
-        "SOMA": "<http://www.ease-crc.org/ont/SOMA.owl>",
-        "dul": "<http://www.ontologydesignpatterns.org/ont/dul/DUL.owl>",
-        "rdf": "<http://www.w3.org/1999/02/22-rdf-syntax-ns>",
-        "owl": "<http://www.w3.org/2002/07/owl>"
+        "SOMA": "http://www.ease-crc.org/ont/SOMA.owl",
+        "dul": "http://www.ontologydesignpatterns.org/ont/dul/DUL.owl",
+        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns",
+        "owl": "http://www.w3.org/2002/07/owl"
     }
 
     # Triple type for readability
@@ -35,9 +35,12 @@ class DesignatorParser:
      }
     
     # Map CRAM object types to SOMA object types
+    # TODO: Find the correct mapping for the object types
     object_type_map = {
-            "Milk": "http://www.ease-crc.org/ont/SOMA.owl#Milk",
-            "Table": "http://www.ease-crc.org/ont/SOMA.owl#Table",
+            "PyCRAP.Floor": "http://www.ease-crc.org/ont/SOMA.owl#Floor",
+            "PyCRAP.Robot": "http://www.ease-crc.org/ont/SOMA.owl#Robot",
+            "PyCRAP.Milk" : "http://www.ease-crc.org/ont/SOMA.owl#Milk",
+            "PyCRAP.Apartment" : "http://www.ease-crc.org/ont/SOMA.owl#Apartment"
             # Add more mappings as needed
      }
     
@@ -53,7 +56,7 @@ class DesignatorParser:
         """
         return self.action_type_map[cram_action_type]
 
-    def create_individual(self, class_uri: str, prefix: str = "ind", id: str = None) -> str:
+    def create_individual(self, class_uri: str, id: str = None) -> str:
         """
         Create a new individual URI based on class name and a UUID
 
@@ -65,45 +68,41 @@ class DesignatorParser:
             A URI string for the new individual
         """
         # Extract class name from URI (get everything after the last # or :)
-        class_name = class_uri.split('#')[-1] if '#' in class_uri else class_uri.split(':')[-1]
+        url, class_name = class_uri.rsplit("#", 1) if "#" in class_uri else class_uri.rsplit(":", 1)
 
         # If an ID is provided, use it; otherwise, generate a new UUID
         if id:
-            individual_id = f"{prefix}_{class_name}_{id}"
+            individual_id = f"{class_name}_{id}"
         else:
             # Generate a new UUID
-            individual_id = f"{prefix}_{class_name}_{uuid.uuid4().hex[:8]}"
+            individual_id = f"{class_name}_{uuid.uuid4().hex[:8]}"
 
         # Construct URI
-        if ":" in class_uri:
-            prefix, _ = class_uri.split(":", 1)
-            return f"{prefix}:{individual_id}"
+        if url.endswith("#"):
+            individual_uri = f"{url}{individual_id}"
         else:
-            return f"<{individual_id}>"
+            individual_uri = f"{url}#{individual_id}"
+        return individual_uri
 
     def triple(self, subject: str, predicate: str, object_: str) -> Triple:
         """Helper function to format a triple with proper prefix expansion"""
         for prefix, uri in self.PREFIXES.items():
             if subject.startswith(f"{prefix}:"):
-                subject = subject.replace(f"{prefix}:", f"{uri[:-1]}#")
+                subject = subject.replace(f"{prefix}:", f"{uri}#")
             if predicate.startswith(f"{prefix}:"):
-                predicate = predicate.replace(f"{prefix}:", f"{uri[:-1]}#")
+                predicate = predicate.replace(f"{prefix}:", f"{uri}#")
             if object_.startswith(f"{prefix}:"):
-                object_ = object_.replace(f"{prefix}:", f"{uri[:-1]}#")
-
-        # Add angle brackets if not present and not a literal
-        if not subject.startswith("<") and not subject.startswith('"'):
-            subject = f"<{subject}>"
-        if not predicate.startswith("<") and not predicate.startswith('"'):
-            predicate = f"<{predicate}>"
-        if not object_.startswith("<") and not object_.startswith('"') and not object_.startswith("_"):
-            object_ = f"<{object_}>"
-
+                object_ = object_.replace(f"{prefix}:", f"{uri}#")
+            if subject.startswith(f"{prefix}#"):
+                subject = subject.replace(f"{prefix}#", f"{uri}#")
+            if predicate.startswith(f"{prefix}#"):
+                predicate = predicate.replace(f"{prefix}#", f"{uri}#")
+            if object_.startswith(f"{prefix}#"):
+                object_ = object_.replace(f"{prefix}#", f"{uri}#")
         return (subject, predicate, object_)
     
     def push_object_designator(self,
-            designator_content: Dict[str, Any],
-            time_as_float: float
+            designator_content: Dict[str, Any]
     ) -> List[Triple]:
         """
         Push an object designator to the knowledge base
@@ -116,17 +115,17 @@ class DesignatorParser:
             A list of triples representing the designator
         """
         triples = []
-        # Create individual for the object 
-        object_designator_uri = self.create_individual(designator_content["anObject"]["type"])
-        # Create the Object with the hasType the type of the object
+        # Create the designator
         object_type = designator_content["anObject"]["type"]
-        object_type_uri = self.map_object_type_from_cram_to_soma(object_type)
-        object_type_uri = self.create_individual(object_type_uri)
+        object_type_uri = self.object_type_map[object_type]
+        # Create individual for the object 
+        object_designator_uri = self.create_individual(object_type_uri)
+        # Create the Object with the hasType the type of the object
         triples.append(self.triple(object_designator_uri, "rdf:type", object_type_uri))
-        # Add the urdf link to the object designator
-        urdf_link = designator_content["anObject"].get("urdf_link")
-        if urdf_link:
-            triples.append(self.triple(object_designator_uri, "SOMA:hasUrdfLink", urdf_link))
+        # Add the urdf links to the object designator
+        urdf_links = designator_content["anObject"].get("links")
+        for link in urdf_links:
+            triples.append(self.triple(object_designator_uri, "SOMA:hasUrdfLink", str(link)))
         return triples
         
 

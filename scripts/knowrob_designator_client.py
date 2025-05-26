@@ -25,9 +25,17 @@ def testQueryDesig():
     rospy.loginfo(f"asking [{query}] ...")
     result = know.ask_all(query, get_default_modalframe())
     rospy.loginfo(f"response: [{result}]")
+    
+    # Query for all objects of type http://www.ease-crc.org/ont/SOMA.owl#Apartment
+    query = "triple(?d, 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'http://www.ease-crc.org/ont/SOMA.owl#Apartment'), " \
+            "triple(?d, 'http://www.ease-crc.org/ont/SOMA.owl#hasUrdfLink', ?link)"
+    rospy.loginfo(f"asking [{query}] ...")
+    result = know.ask_all(query, get_default_modalframe())
+    rospy.loginfo(f"response: [{result}]")
+    # Query for soma SOMA:hasUrdfLink for the first object
+    
 
 def main():
-    rospy.init_node('knowrob_designator_topic_client')
     now = rospy.Time.now()
 
     # Publishers
@@ -155,9 +163,9 @@ def main():
     exec_finished_msg.json_designator = resolved_designator
     rospy.loginfo("Publishing DesignatorExecutionFinished...")
     exec_finished_pub.publish(exec_finished_msg)
-    
-    # Finally do some testing queries with KnowRob
-    testQueryDesig()
 
 if __name__ == '__main__':
-    main()
+    rospy.init_node('knowrob_designator_topic_client')
+    # main()
+    # Finally do some testing queries with KnowRob
+    testQueryDesig()

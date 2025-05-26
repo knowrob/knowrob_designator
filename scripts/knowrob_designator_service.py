@@ -25,6 +25,7 @@ from knowrob_ros.knowrob_ros_lib import KnowRobRosLib, TripleQueryBuilder, get_d
 from knowrob_designator.designator_parser import DesignatorParser
 
 print_triples = True
+print_object_triples = True
 
 class DesignatorLoggerNode:
     def __init__(self):
@@ -65,9 +66,8 @@ class DesignatorLoggerNode:
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo("Push Object Designator")
         designator = json.loads(msg.json_designator)
-        # Crete the designator
-        # triples = self.parser.push_object_designator(designator)
-        triples = []
+        # Create the designator
+        triples = self.parser.push_object_designator(designator)
         # Translate triples to knowrob triples
         builder = TripleQueryBuilder()
         for s, p, o in triples:
@@ -87,14 +87,10 @@ class DesignatorLoggerNode:
         modal_frame = get_default_modalframe()
         modal_frame.confidence = 1.0
         # Add the designator to knowrob
-        # self.knowrob.tell(builder.get_triples(), modal_frame)
+        self.knowrob.tell(builder.get_triples(), modal_frame)
         rospy.loginfo(f"Sent {len(triples)} triples for PushObjectDesignator")
-        if print_triples:
-            to_print = ""
-            to_print += f"Triples for PushObjectDesignator:\n"
-            for s, p, o in triples:
-                to_print += f"{s} {p} {o}\n"
-            rospy.loginfo(to_print)
+        if print_object_triples:
+            rospy.loginfo(f"Unresolved Action designator triples: {str(builder.get_triples())}")
 
     def handle_init(self, msg):
         rospy.loginfo("----------------------------------------------------------")
@@ -134,11 +130,7 @@ class DesignatorLoggerNode:
         self.knowrob.tell(builder.get_triples(), modal_frame)
         rospy.loginfo(f"Sent {len(triples)} unresolved Action designator triples for {designator_id}")
         if print_triples:
-            to_print = ""
-            to_print += f"Unresolved triples for {designator_id}:\n"
-            for s, p, o in triples:
-                to_print += f"{s} {p} {o}\n"
-            rospy.loginfo(to_print)
+            rospy.loginfo(f"Unresolved Action designator triples: {str(builder.get_triples())}")
         
         # Mark start and buffer any early finish
         with self.lock:
@@ -186,11 +178,8 @@ class DesignatorLoggerNode:
         self.knowrob.tell(builder.get_triples(), modal_frame)
         rospy.loginfo(f"Sent {len(triples)} resolving triples for Action task {resolving_uri}")
         if print_triples:
-            to_print = ""
-            to_print += f"Resolving triples for {resolving_uri}:\n"
-            for s, p, o in triples:
-                to_print += f"{s} {p} {o}\n"
-            rospy.loginfo(to_print)
+            rospy.loginfo(f"Unresolved Action designator triples: {str(builder.get_triples())}")
+
 
     def handle_exec_start(self, msg):
         rospy.loginfo("----------------------------------------------------------")
