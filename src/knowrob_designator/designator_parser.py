@@ -408,6 +408,25 @@ class DesignatorParser:
         triples.append(self.triple(event_uri, "SOMA:hasDesignator", designator_uri))
         # Return the event URI and triples
         return event_uri, triples
+    
+    def designator_query(self, designator_as_json) -> List[Triple]:
+        """
+        Parse a designator from JSON and return the corresponding triples.
+
+        Args:
+            designator_as_json: The designator in JSON format
+
+        Returns:
+            A list of triples representing the designator
+        """
+        # This function is a placeholder for actual implementation
+        # It should parse the JSON and create the appropriate triples
+        # For now, it returns a triple of this form:
+        # triple(?d, 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'http://www.ease-crc.org/ont/SOMA.owl#PyCramActionDesignator')"
+        triples = []
+        triples.append(self.triple("?d", "rdf:type", "SOMA:PyCramActionDesignator"))
+        return triples
+
         
 if __name__ == "__main__":
     import json

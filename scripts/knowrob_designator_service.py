@@ -21,6 +21,7 @@ from knowrob_designator.msg import (
     DesignatorQueryIncrementalFeedback
 )
 
+from knowrob import *
 from knowrob_ros.knowrob_ros_lib import KnowRobRosLib, TripleQueryBuilder, get_default_modalframe
 from knowrob_designator.designator_parser import DesignatorParser
 
@@ -256,7 +257,17 @@ class DesignatorLoggerNode:
                 to_print += f"{s} {p} {o}\n"
             rospy.loginfo(to_print)
             
+
     def execute_query_incremental(self, goal):
+        """
+        ROS action callback. Either continues an existing multi‐solution query
+        (if goal.query_id is provided), or starts a new one by:
+          1. loading goal.designator_json
+          2. calling designator_query(...) → list of triples
+          3. converting those triples into a single conjunctive query string
+          4. calling runQuery(queryStr) against the KB
+          5. storing all returned bindings under a fresh query_id
+        """
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"Query Incremental: {goal.designator_json}")
         feedback = DesignatorQueryIncrementalFeedback()
@@ -265,41 +276,110 @@ class DesignatorLoggerNode:
         self.query_incremental_server.publish_feedback(feedback)
 
         try:
-            # Case 1: Continue an existing query by ID
+            # ------ CASE 1: Continue an existing query if query_id was provided ------
             if goal.query_id:
                 query_id = str(goal.query_id)
                 if query_id in self.query_history:
-                    query_id = str(goal.query_id)
-                    bindings, index = self.query_history[query_id]
-
-                    if index < len(bindings):
+                    bindings, next_idx = self.query_history[query_id]
+                    # If we still have more solutions to hand back:
+                    if next_idx < len(bindings):
                         result.success = True
-                        result.binding_as_json = json.dumps(bindings[index])
+                        result.binding_as_json = json.dumps(bindings[next_idx])
                         result.query_id = query_id
-                        self.query_history[query_id] = (bindings, index + 1)
+                        # increment the index for next time
+                        self.query_history[query_id] = (bindings, next_idx + 1)
                     else:
+                        # no more solutions
                         result.success = False
                         result.binding_as_json = "{}"
                         result.query_id = query_id
                     self.query_incremental_server.set_succeeded(result)
                     return
+                # if query_id not found, fall through to "new query" below
 
-            # Case 2: New query
+            # ------ CASE 2: New query (either no query_id passed or not found in history) ------
+            # Parse the designator JSON
             designator = json.loads(goal.designator_json)
-            query_id = str(uuid.uuid4().int & (1 << 32) - 1)
 
-            if goal.query_type == "entityvar":
-                success, bindings = self.handle_entityvar(designator)
-                if success:
-                    self.query_history[query_id] = (bindings, 1)
-                    result.success = True
-                    result.binding_as_json = json.dumps(bindings[0])
-                    result.query_id = query_id
-                else:
-                    result.success = False
-                    result.binding_as_json = "{}"
-                    result.query_id = query_id
+            # 1) Call designator_query(...) to get a list of triples
+            #    Each triple is assumed to be a 3‐tuple: (subject, predicate, object).
+            triples = self.parser.designator_query(designator)
+
+            # 2) Build a conjunctive query string from all triples.
+            #    For each triple (s, p, o), we turn it into "p(s,o)".
+            #    Then we join with commas or "&" (whatever your parser expects).
+            #    Here, we assume QueryParser.parse() can handle something like:
+            #        "parent(?x, john) & sibling(?x, ?y)"
+            #    Adjust the delimiter if your KB expects a different syntax (e.g. spaces, “,”, “,” + newline).
+            conjuncts = []
+            for (s, p, o) in triples:
+                # If any term is a JSON‐encoded dict (e.g. nested), you might need to stringify it.
+                # Create the string triple(subject, predicate, object). The three strings should
+                # be sourrounded by single quotes, e.g.:
+                # triple('s', 'p', 'o')
+                # if the string starts with an ?, we assume it is a variable, and we do not
+                # surround it with single quotes.
+                s_q = s if s.startswith("?") else f"'{s}'"
+                p_q = p if p.startswith("?") else f"'{p}'"
+                o_q = o if o.startswith("?") else f"'{o}'"
+                conjuncts.append(f"triple({s_q}, {p_q}, {o_q})")
+                
+            query_str = ", ".join(conjuncts)
+
+            # 3) Call KnowRob’s ROS service / method ask_all(...)
+            #    Assume get_default_modalframe() is a helper that returns a modalframe object.
+            ask_result = self.knowrob.ask_all(query_str, get_default_modalframe())
+
+            # 4) Unpack ask_result into a Python list of dicts.
+            #
+            #    - If ask_result.status is FALSE or QUERY_FAILED, we treat as “no solutions.”
+            #    - Otherwise, iterate over ask_result.answers (a GraphAnswerMessage[]).
+            #    - Each GraphAnswerMessage has a field .substitution (KeyValuePair[]).
+            #
+            all_bindings = []  # will become List[ { var: bound_value, … }, … ]
+            if ask_result.status == ask_result.TRUE and ask_result.answers:
+                for answer_msg in ask_result.answers:
+                    # answer_msg.substitution is a list of KeyValuePair
+                    binding_dict = {}
+                    for kv in answer_msg.substitution:
+                        # kv.key is the variable name, e.g. "?x"
+                        var_name = kv.key
+
+                        # Determine which value field is non‐empty based on kv.type
+                        if kv.type == kv.TYPE_STRING:
+                            bound_val = kv.value_string
+                        elif kv.type == kv.TYPE_FLOAT:
+                            bound_val = str(kv.value_float)
+                        elif kv.type == kv.TYPE_INT:
+                            bound_val = str(kv.value_int)
+                        elif kv.type == kv.TYPE_LONG:
+                            bound_val = str(kv.value_long)
+                        elif kv.type == kv.TYPE_VARIABLE:
+                            bound_val = kv.value_variable
+                        elif kv.type == kv.TYPE_PREDICATE:
+                            bound_val = kv.value_predicate
+                        elif kv.type == kv.TYPE_LIST:
+                            # for lists, we only have a flat string to parse if needed
+                            bound_val = kv.value_list
+                        else:
+                            # unknown type: fallback to string
+                            bound_val = kv.value_string if kv.value_string else ""
+                        binding_dict[var_name] = bound_val
+
+                    all_bindings.append(binding_dict)
+
+
+            # 5) Generate a new query_id and store the entire list of bindings
+            query_id = str(uuid.uuid4().int & ((1 << 32) - 1))
+
+            if all_bindings is not None and len(all_bindings) > 0:
+                # Save bindings + set next index = 1 (we'll return index 0 right now)
+                self.query_history[query_id] = (all_bindings, 1)
+                result.success = True
+                result.binding_as_json = json.dumps(all_bindings[0])
+                result.query_id = query_id
             else:
+                # Either answer was “No” or no results
                 result.success = False
                 result.binding_as_json = "{}"
                 result.query_id = query_id
@@ -310,43 +390,9 @@ class DesignatorLoggerNode:
             result.binding_as_json = "{}"
             result.query_id = "0"
 
+        # 6) Always send the final result back to ROS
         self.query_incremental_server.set_succeeded(result)
 
-    def handle_entityvar(self, designator):
-        # Match: {"anObject": {"type": "?x", "usedFor": "breakfast"}}
-        if (
-            "anObject" in designator and
-            isinstance(designator["anObject"], dict) and
-            designator["anObject"].get("usedFor") == "breakfast" and
-            designator["anObject"].get("type") == "?x"
-        ):
-            # Simulate multiple solutions
-            return True, [
-                {"?x": "Cereal"},
-                {"?x": "Milk"}
-            ]
-
-        # Match: {"anAction": {"type": "searching", ...}}
-        if (
-            "anAction" in designator and
-            isinstance(designator["anAction"], dict) and
-            designator["anAction"].get("type") == "searching"
-        ):
-            return True, [
-                {
-                    "?x": {
-                        "aLocation": {
-                            "insideOf": {
-                                "anObject": {
-                                    "URDFLink": "fridge_main"
-                                }
-                            }
-                        }
-                    }
-                }
-            ]
-
-        return False, []
 
 if __name__ == '__main__':
     try:
