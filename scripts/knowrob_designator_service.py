@@ -232,31 +232,6 @@ class DesignatorLoggerNode:
         # TODO: How do i add the end time?
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"Execution Finished: {msg.designator_id}")
-            
-    def execute_query_incremental(self, goal):
-        rospy.loginfo("----------------------------------------------------------")
-        rospy.loginfo(f"Query Incremental: {goal.query}")
-        # Parse the query
-        query = json.loads(goal.query)
-        # Create the query
-        uri, triples = self.parser.create_query_incremental(query)
-        # Translate triples to knowrob triples
-        builder = TripleQueryBuilder()
-        for s, p, o in triples:
-            builder.add(s, p, o)
-        # Set the modal frame
-        modal_frame = get_default_modalframe()
-        modal_frame.confidence = 1.0
-        # Add the designator to knowrob
-        self.knowrob.tell(builder.get_triples(), modal_frame)
-        rospy.loginfo(f"Sent {len(triples)} query incrementals for {goal.query}")
-        if print_triples:
-            to_print = ""
-            to_print += f"Query incrementals for {goal.query}:\n"
-            for s, p, o in triples:
-                to_print += f"{s} {p} {o}\n"
-            rospy.loginfo(to_print)
-            
 
     def execute_query_incremental(self, goal):
         """
@@ -329,6 +304,13 @@ class DesignatorLoggerNode:
             # 3) Call KnowRob’s ROS service / method ask_all(...)
             #    Assume get_default_modalframe() is a helper that returns a modalframe object.
             ask_result = self.knowrob.ask_all(query_str, get_default_modalframe())
+            
+            # Print all triples if requested
+            rospy.loginfo(f"Query string: {query_str}")
+            if ask_result.status == ask_result.TRUE:
+                rospy.loginfo(f"Query result: {ask_result.answers}")
+            else:
+                rospy.loginfo(f"Query failed with status: {ask_result.status}")
 
             # 4) Unpack ask_result into a Python list of dicts.
             #

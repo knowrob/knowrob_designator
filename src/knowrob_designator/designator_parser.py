@@ -7,7 +7,8 @@ class DesignatorParser:
         "SOMA": "http://www.ease-crc.org/ont/SOMA.owl",
         "dul": "http://www.ontologydesignpatterns.org/ont/dul/DUL.owl",
         "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns",
-        "owl": "http://www.w3.org/2002/07/owl"
+        "owl": "http://www.w3.org/2002/07/owl",
+        "urdf": "http://knowrob.org/kb/urdf.owl"
     }
 
     # Triple type for readability
@@ -409,23 +410,72 @@ class DesignatorParser:
         # Return the event URI and triples
         return event_uri, triples
     
-    def designator_query(self, designator_as_json) -> List[Triple]:
-        """
-        Parse a designator from JSON and return the corresponding triples.
-
-        Args:
-            designator_as_json: The designator in JSON format
-
-        Returns:
-            A list of triples representing the designator
-        """
-        # This function is a placeholder for actual implementation
-        # It should parse the JSON and create the appropriate triples
-        # For now, it returns a triple of this form:
-        # triple(?d, 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'http://www.ease-crc.org/ont/SOMA.owl#PyCramActionDesignator')"
+    def designator_query(self, designator_as_json):
         triples = []
-        triples.append(self.triple("?d", "rdf:type", "SOMA:PyCramActionDesignator"))
+        var_counter = 0
+
+        def new_var(prefix="?obj"):
+            nonlocal var_counter
+            var_counter += 1
+            return f"{prefix}{var_counter}"
+
+        def recursive_parse(entity, subject_var):
+            if 'anObject' in entity and isinstance(entity['anObject'], dict):
+                obj_var = new_var("?object")
+                triples.append(self.triple(obj_var, 'rdf:type', 'soma:PhysicalObject'))
+                recursive_parse(entity['anObject'], obj_var)
+
+            if 'anAction' in entity and isinstance(entity['anAction'], dict):
+                action_var = new_var("?action")
+                triples.append(self.triple(action_var, 'rdf:type', 'dul:Action'))
+                recursive_parse(entity['anAction'], action_var)
+
+            if 'aLocation' in entity and isinstance(entity['aLocation'], dict):
+                location_var = new_var("?location")
+                triples.append(self.triple(location_var, 'rdf:type', 'dul:Location'))
+                recursive_parse(entity['aLocation'], location_var)
+
+            if 'type' in entity and isinstance(entity['type'], str):
+                triples.append(self.triple(subject_var, 'rdf:type', entity['type']))
+
+            if 'playsrole' in entity and isinstance(entity['playsrole'], list) and len(entity['playsrole']) == 2:
+                role, event = entity['playsrole']
+
+                if isinstance(role, str) and isinstance(event, str):
+                    event_var = new_var("?event")
+                    triples.append(self.triple(subject_var, 'dul:hasRole', role))
+                    triples.append(self.triple(event_var, 'rdf:type', event))
+                    triples.append(self.triple(subject_var, 'dul:isParticipantIn', event_var))
+                elif isinstance(event, dict):
+                    recursive_parse(event, subject_var)
+
+            if 'hasURDFLink' in entity and isinstance(entity['hasURDFLink'], str):
+                triples.append(self.triple(subject_var, 'urdf:hasBaseLinkName', entity['hasURDFLink']))
+
+            for key, value in entity.items():
+                if isinstance(value, dict) and key not in ['anObject', 'anAction', 'aLocation']:
+                    recursive_parse(value, subject_var)
+
+        # Determine root var type based on top-level key
+        if 'anObject' in designator_as_json:
+            root_var = new_var("?object")
+            triples.append(self.triple(root_var, 'rdf:type', 'soma:PhysicalObject'))
+            recursive_parse(designator_as_json['anObject'], root_var)
+        elif 'anAction' in designator_as_json:
+            root_var = new_var("?action")
+            triples.append(self.triple(root_var, 'rdf:type', 'dul:Action'))
+            recursive_parse(designator_as_json['anAction'], root_var)
+        elif 'aLocation' in designator_as_json:
+            root_var = new_var("?location")
+            triples.append(self.triple(root_var, 'rdf:type', 'dul:Location'))
+            recursive_parse(designator_as_json['aLocation'], root_var)
+        else:
+            root_var = '?d'
+            triples.append(self.triple(root_var, 'rdf:type', 'SOMA:PyCramActionDesignator'))
+            recursive_parse(designator_as_json, root_var)
+
         return triples
+
 
         
 if __name__ == "__main__":
