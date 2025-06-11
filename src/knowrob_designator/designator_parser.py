@@ -449,6 +449,13 @@ class DesignatorParser:
                 elif isinstance(event, dict):
                     recursive_parse(event, subject_var)
 
+            if 'hasParticipantWithRole' in entity and isinstance(entity['hasParticipantWithRole'], list) and len(entity['hasParticipantWithRole']) == 2:
+                participant_type, role = entity['hasParticipantWithRole']
+                participant_var = new_var("?participant")
+                triples.append(self.triple(participant_var, 'rdf:type', participant_type))
+                triples.append(self.triple(participant_var, 'dul:hasRole', role))
+                triples.append(self.triple(participant_var, 'dul:isParticipantIn', subject_var))
+
             if 'hasURDFLink' in entity and isinstance(entity['hasURDFLink'], str):
                 triples.append(self.triple(subject_var, 'urdf:hasBaseLinkName', entity['hasURDFLink']))
 
@@ -475,7 +482,6 @@ class DesignatorParser:
             recursive_parse(designator_as_json, root_var)
 
         return triples
-
 
         
 if __name__ == "__main__":

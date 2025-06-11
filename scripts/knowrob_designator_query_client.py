@@ -47,7 +47,7 @@ if __name__ == '__main__':
             "playsrole": ["Deposit", {
                 "anAction": {
                     "type": "Depositing",
-                    "playsrole": ["DepositedObject", "Milk"]
+                    "hasParticipantWithRole": ["Milk", "DepositedObject"]
                 }
             }]
         }
