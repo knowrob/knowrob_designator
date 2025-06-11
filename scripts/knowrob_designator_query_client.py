@@ -30,7 +30,7 @@ if __name__ == '__main__':
     breakfast_query = {
         "anObject": {
             "type": "?x",
-            "playsrole": ["food", "breakfast"]
+            "playsrole": ["container", "breakfast"]
         }
     }
 

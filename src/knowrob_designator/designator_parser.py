@@ -8,7 +8,8 @@ class DesignatorParser:
         "dul": "http://www.ontologydesignpatterns.org/ont/dul/DUL.owl",
         "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns",
         "owl": "http://www.w3.org/2002/07/owl",
-        "urdf": "http://knowrob.org/kb/urdf.owl"
+        "urdf": "http://knowrob.org/kb/urdf.owl",
+        "dfl": "http://www.ease-crc.org/ont/SOMA_DFL.owl"
     }
 
     # Triple type for readability
@@ -422,7 +423,7 @@ class DesignatorParser:
         def recursive_parse(entity, subject_var):
             if 'anObject' in entity and isinstance(entity['anObject'], dict):
                 obj_var = new_var("?object")
-                triples.append(self.triple(obj_var, 'rdf:type', 'soma:PhysicalObject'))
+                triples.append(self.triple(obj_var, 'rdf:type', 'dul:PhysicalObject'))
                 recursive_parse(entity['anObject'], obj_var)
 
             if 'anAction' in entity and isinstance(entity['anAction'], dict):
@@ -442,16 +443,26 @@ class DesignatorParser:
                 role, event = entity['playsrole']
 
                 if isinstance(role, str) and isinstance(event, str):
-                    event_var = new_var("?event")
-                    triples.append(self.triple(subject_var, 'dul:hasRole', role))
-                    triples.append(self.triple(event_var, 'rdf:type', event))
-                    triples.append(self.triple(subject_var, 'dul:isParticipantIn', event_var))
+                    # Specific shortcut reasoning case: breakfast food
+                    if role == "food" and event == "breakfast":
+                        triples.append(self.triple(subject_var, 'dfl:isInstanceOf', 'dfl:breakfast_food.n.wn.food'))
+                    elif role == "container" and event == "breakfast":
+                        food_var = new_var("?food")
+                        triples.append(self.triple(food_var, 'dfl:isInstanceOf', 'dfl:breakfast_food.n.wn.food'))
+                        triples.append(self.triple(subject_var, 'dfl:hasPart', food_var))
+                    else:
+                        event_var = new_var("?event")
+                        triples.append(self.triple(subject_var, 'dul:hasRole', role))
+                        triples.append(self.triple(event_var, 'rdf:type', event))
+                        triples.append(self.triple(subject_var, 'dul:isParticipantIn', event_var))
+
                 elif isinstance(event, dict):
                     recursive_parse(event, subject_var)
 
             if 'hasParticipantWithRole' in entity and isinstance(entity['hasParticipantWithRole'], list) and len(entity['hasParticipantWithRole']) == 2:
                 participant_type, role = entity['hasParticipantWithRole']
                 participant_var = new_var("?participant")
+                triples.append(self.triple(subject_var, 'dul:hasParticipant', participant_var))
                 triples.append(self.triple(participant_var, 'rdf:type', participant_type))
                 triples.append(self.triple(participant_var, 'dul:hasRole', role))
                 triples.append(self.triple(participant_var, 'dul:isParticipantIn', subject_var))
@@ -466,7 +477,7 @@ class DesignatorParser:
         # Determine root var type based on top-level key
         if 'anObject' in designator_as_json:
             root_var = new_var("?object")
-            triples.append(self.triple(root_var, 'rdf:type', 'soma:PhysicalObject'))
+            #triples.append(self.triple(root_var, 'rdf:type', 'soma:PhysicalObject'))
             recursive_parse(designator_as_json['anObject'], root_var)
         elif 'anAction' in designator_as_json:
             root_var = new_var("?action")
@@ -482,6 +493,7 @@ class DesignatorParser:
             recursive_parse(designator_as_json, root_var)
 
         return triples
+
 
         
 if __name__ == "__main__":
