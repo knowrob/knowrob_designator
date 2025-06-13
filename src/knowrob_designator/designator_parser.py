@@ -436,8 +436,8 @@ class DesignatorParser:
                 triples.append(self.triple(location_var, 'rdf:type', 'dul:Location'))
                 recursive_parse(entity['aLocation'], location_var)
 
-            if 'type' in entity and isinstance(entity['type'], str):
-                triples.append(self.triple(subject_var, 'rdf:type', entity['type']))
+            #if 'type' in entity and isinstance(entity['type'], str):
+                #triples.append(self.triple(subject_var, 'rdf:type', entity['type']))
 
             if 'playsrole' in entity and isinstance(entity['playsrole'], list) and len(entity['playsrole']) == 2:
                 role, event = entity['playsrole']
@@ -448,7 +448,7 @@ class DesignatorParser:
                         triples.append(self.triple(subject_var, 'dfl:isInstanceOf', 'dfl:breakfast_food.n.wn.food'))
                     elif role == "container" and event == "breakfast":
                         food_var = new_var("?food")
-                        triples.append(self.triple(food_var, 'dfl:isInstanceOf', 'dfl:breakfast_food.n.wn.food'))
+                        triples.append(self.triple(food_var, 'dfl:isSubclassOf', 'dfl:breakfast_food.n.wn.food'))
                         triples.append(self.triple(subject_var, 'dfl:hasPart', food_var))
                     else:
                         event_var = new_var("?event")

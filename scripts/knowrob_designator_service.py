@@ -308,7 +308,10 @@ class DesignatorLoggerNode:
             # Print all triples if requested
             rospy.loginfo(f"Query string: {query_str}")
             if ask_result.status == ask_result.TRUE:
-                rospy.loginfo(f"Query result: {ask_result.answers}")
+                rospy.loginfo("value_strings: %s", 
+                    [kv.value_string 
+                        for res in ask_result.answers 
+                        for kv  in res.substitution])
             else:
                 rospy.loginfo(f"Query failed with status: {ask_result.status}")
 
