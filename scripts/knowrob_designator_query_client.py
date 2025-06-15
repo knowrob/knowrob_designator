@@ -40,16 +40,24 @@ if __name__ == '__main__':
     print(f"Binding: {result1.binding_as_json}")
 
     # Query: Storage place for Milk
+    # milk_storage_query = {
+    #     "anObject": {
+    #         "type": "?t",
+    #         "hasURDFLink": "?link",
+    #         "playsrole": ["Deposit", {
+    #             "anAction": {
+    #                 "type": "Depositing",
+    #                 "hasParticipantWithRole": ["Milk", "DepositedObject"]
+    #             }
+    #         }]
+    #     }
+    # }
+    
     milk_storage_query = {
         "anObject": {
             "type": "?t",
             "hasURDFLink": "?link",
-            "playsrole": ["Deposit", {
-                "anAction": {
-                    "type": "Depositing",
-                    "hasParticipantWithRole": ["Milk", "DepositedObject"]
-                }
-            }]
+            "playsrole": ["Deposit", "Milk"]
         }
     }
 
