@@ -234,15 +234,6 @@ class DesignatorLoggerNode:
         rospy.loginfo(f"Execution Finished: {msg.designator_id}")
 
     def execute_query_incremental(self, goal):
-        """
-        ROS action callback. Either continues an existing multi‐solution query
-        (if goal.query_id is provided), or starts a new one by:
-          1. loading goal.designator_json
-          2. calling designator_query(...) → list of triples
-          3. converting those triples into a single conjunctive query string
-          4. calling runQuery(queryStr) against the KB
-          5. storing all returned bindings under a fresh query_id
-        """
         rospy.loginfo("----------------------------------------------------------")
         rospy.loginfo(f"Query Incremental: {goal.designator_json}")
         feedback = DesignatorQueryIncrementalFeedback()
@@ -250,87 +241,62 @@ class DesignatorLoggerNode:
         feedback.status_message = f"Received query of type '{goal.query_type}'"
         self.query_incremental_server.publish_feedback(feedback)
 
+        def extract_variables_from_designator(d):
+            vars_found = set()
+            def recurse(val):
+                if isinstance(val, dict):
+                    for v in val.values():
+                        recurse(v)
+                elif isinstance(val, list):
+                    for v in val:
+                        recurse(v)
+                elif isinstance(val, str) and val.startswith("?"):
+                    vars_found.add(val)
+            recurse(d)
+            return vars_found
+
         try:
-            # ------ CASE 1: Continue an existing query if query_id was provided ------
             if goal.query_id:
                 query_id = str(goal.query_id)
                 if query_id in self.query_history:
                     bindings, next_idx = self.query_history[query_id]
-                    # If we still have more solutions to hand back:
                     if next_idx < len(bindings):
                         result.success = True
                         result.binding_as_json = json.dumps(bindings[next_idx])
                         result.query_id = query_id
-                        # increment the index for next time
                         self.query_history[query_id] = (bindings, next_idx + 1)
                     else:
-                        # no more solutions
                         result.success = False
                         result.binding_as_json = "{}"
                         result.query_id = query_id
                     self.query_incremental_server.set_succeeded(result)
                     return
-                # if query_id not found, fall through to "new query" below
 
-            # ------ CASE 2: New query (either no query_id passed or not found in history) ------
-            # Parse the designator JSON
             designator = json.loads(goal.designator_json)
+            user_vars = extract_variables_from_designator(designator)
 
-            # 1) Call designator_query(...) to get a list of triples
-            #    Each triple is assumed to be a 3‐tuple: (subject, predicate, object).
             triples = self.parser.designator_query(designator)
+            rdf_type_triples = [t for t in triples if t[1] == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]
+            non_type_triples = [t for t in triples if t[1] != "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]
 
-            # 2) Build a conjunctive query string from all triples.
-            #    For each triple (s, p, o), we turn it into "p(s,o)".
-            #    Then we join with commas or "&" (whatever your parser expects).
-            #    Here, we assume QueryParser.parse() can handle something like:
-            #        "parent(?x, john) & sibling(?x, ?y)"
-            #    Adjust the delimiter if your KB expects a different syntax (e.g. spaces, “,”, “,” + newline).
             conjuncts = []
-            for (s, p, o) in triples:
-                # If any term is a JSON‐encoded dict (e.g. nested), you might need to stringify it.
-                # Create the string triple(subject, predicate, object). The three strings should
-                # be sourrounded by single quotes, e.g.:
-                # triple('s', 'p', 'o')
-                # if the string starts with an ?, we assume it is a variable, and we do not
-                # surround it with single quotes.
+            for (s, p, o) in non_type_triples:
                 s_q = s if s.startswith("?") else f"'{s}'"
                 p_q = p if p.startswith("?") else f"'{p}'"
                 o_q = o if o.startswith("?") else f"'{o}'"
                 conjuncts.append(f"triple({s_q}, {p_q}, {o_q})")
-                
             query_str = ", ".join(conjuncts)
 
-            # 3) Call KnowRob’s ROS service / method ask_all(...)
-            #    Assume get_default_modalframe() is a helper that returns a modalframe object.
             ask_result = self.knowrob.ask_all(query_str, get_default_modalframe())
-            
-            # Print all triples if requested
             rospy.loginfo(f"Query string: {query_str}")
-            if ask_result.status == ask_result.TRUE:
-                rospy.loginfo("value_strings: %s", 
-                    [kv.value_string 
-                        for res in ask_result.answers 
-                        for kv  in res.substitution])
-            else:
-                rospy.loginfo(f"Query failed with status: {ask_result.status}")
 
-            # 4) Unpack ask_result into a Python list of dicts.
-            #
-            #    - If ask_result.status is FALSE or QUERY_FAILED, we treat as “no solutions.”
-            #    - Otherwise, iterate over ask_result.answers (a GraphAnswerMessage[]).
-            #    - Each GraphAnswerMessage has a field .substitution (KeyValuePair[]).
-            #
-            all_bindings = []  # will become List[ { var: bound_value, … }, … ]
+            to_print = ""
+            all_bindings = []
             if ask_result.status == ask_result.TRUE and ask_result.answers:
                 for answer_msg in ask_result.answers:
-                    # answer_msg.substitution is a list of KeyValuePair
-                    binding_dict = {}
+                    # 1. Build full binding (with temp vars)
+                    full_binding = {}
                     for kv in answer_msg.substitution:
-                        # kv.key is the variable name, e.g. "?x"
-                        var_name = kv.key
-
-                        # Determine which value field is non‐empty based on kv.type
                         if kv.type == kv.TYPE_STRING:
                             bound_val = kv.value_string
                         elif kv.type == kv.TYPE_FLOAT:
@@ -344,27 +310,52 @@ class DesignatorLoggerNode:
                         elif kv.type == kv.TYPE_PREDICATE:
                             bound_val = kv.value_predicate
                         elif kv.type == kv.TYPE_LIST:
-                            # for lists, we only have a flat string to parse if needed
                             bound_val = kv.value_list
                         else:
-                            # unknown type: fallback to string
                             bound_val = kv.value_string if kv.value_string else ""
-                        binding_dict[var_name] = bound_val
+                        full_binding[kv.key] = bound_val
 
-                    all_bindings.append(binding_dict)
+                    # 2. Resolve rdf:type triples using full binding
+                    for (s, p, o) in rdf_type_triples:
+                        # Remove ? from subject if present
+                        s = s[1:] if s.startswith("?") else s
+                        s_val = full_binding.get(s)
+                        to_print += f"Processing rdf:type triple: {s} {p} {o} with s_val being {s_val}\n"
+                        if s_val:
+                            to_print += f"Subject resolved to: {s_val}\n"
+                            if p == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type':
+                                to_print += f"Checking type for {s_val} with object {o}\n"
+                                o_val = o if o.startswith("?") else f"'{o}'"
+                                type_query = f"triple('{s_val}', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', {o_val})"
+                                type_result = self.knowrob.ask_all(type_query, get_default_modalframe())
+                                if type_result.status == type_result.TRUE and type_result.answers:
+                                    for ans in type_result.answers:
+                                        for kv in ans.substitution:
+                                            to_print += f"Found type match: {kv.key} -> {kv.value_string}\n"
+                                            if "?" + kv.key == o:
+                                                full_binding[kv.key] = kv.value_string
+                                            
+            # Print the full binding for debugging
+            # to_print += "Full binding:\n"
+            #for var, val in full_binding.items():
+            #    to_print += f"{var}: {val}\n"
+            #to_print += "User-defined vars:\n"
+            #for var in user_vars:
+            #    to_print += f"{var}: {full_binding.get(var, 'N/A')}\n"
+            #rospy.loginfo(to_print)
 
+            # 3. Filter to user-defined vars only
+            filtered_binding = {var: val for var, val in full_binding.items() if "?" + var in user_vars}
+            all_bindings.append(filtered_binding)
 
-            # 5) Generate a new query_id and store the entire list of bindings
             query_id = str(uuid.uuid4().int & ((1 << 32) - 1))
 
-            if all_bindings is not None and len(all_bindings) > 0:
-                # Save bindings + set next index = 1 (we'll return index 0 right now)
+            if all_bindings:
                 self.query_history[query_id] = (all_bindings, 1)
                 result.success = True
                 result.binding_as_json = json.dumps(all_bindings[0])
                 result.query_id = query_id
             else:
-                # Either answer was “No” or no results
                 result.success = False
                 result.binding_as_json = "{}"
                 result.query_id = query_id
@@ -375,7 +366,6 @@ class DesignatorLoggerNode:
             result.binding_as_json = "{}"
             result.query_id = "0"
 
-        # 6) Always send the final result back to ROS
         self.query_incremental_server.set_succeeded(result)
 
 

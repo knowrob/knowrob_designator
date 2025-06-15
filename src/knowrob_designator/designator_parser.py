@@ -420,15 +420,13 @@ class DesignatorParser:
             var_counter += 1
             return f"{prefix}{var_counter}"
 
-        handled_keys = {
-            'playsrole', 'hasParticipantWithRole', 'hasURDFLink',
-            'anObject', 'anAction', 'aLocation', 'type'
-        }
+        def recursive_parse(entity, subject_var):
 
-        def handle_playsrole(entity, subject_var):
             if 'playsrole' in entity and isinstance(entity['playsrole'], list) and len(entity['playsrole']) == 2:
                 role, event = entity['playsrole']
+
                 if isinstance(role, str) and isinstance(event, str):
+                    # Specific shortcut reasoning case: breakfast food
                     if role == "food" and event == "breakfast":
                         triples.append(self.triple(subject_var, 'dfl:isInstanceOf', 'dfl:breakfast_food.n.wn.food'))
                     elif role == "container" and event == "breakfast":
@@ -446,10 +444,10 @@ class DesignatorParser:
                         triples.append(self.triple(subject_var, 'dul:hasRole', role))
                         triples.append(self.triple(event_var, 'rdf:type', event))
                         triples.append(self.triple(subject_var, 'dul:isParticipantIn', event_var))
+
                 elif isinstance(event, dict):
                     recursive_parse(event, subject_var)
 
-        def handle_has_participant_with_role(entity, subject_var):
             if 'hasParticipantWithRole' in entity and isinstance(entity['hasParticipantWithRole'], list) and len(entity['hasParticipantWithRole']) == 2:
                 participant_type, role = entity['hasParticipantWithRole']
                 participant_var = new_var("?participant")
@@ -458,55 +456,36 @@ class DesignatorParser:
                 triples.append(self.triple(participant_var, 'dul:hasRole', role))
                 triples.append(self.triple(participant_var, 'dul:isParticipantIn', subject_var))
 
-        def handle_has_urdf_link(entity, subject_var):
+
             if 'hasURDFLink' in entity and isinstance(entity['hasURDFLink'], str):
                 triples.append(self.triple(subject_var, 'urdf:hasBaseLinkName', entity['hasURDFLink']))
 
-        def handle_an_object(entity, subject_var):
             if 'anObject' in entity and isinstance(entity['anObject'], dict):
                 obj_var = new_var("?object")
                 triples.append(self.triple(obj_var, 'rdf:type', 'dul:PhysicalObject'))
                 recursive_parse(entity['anObject'], obj_var)
 
-        def handle_an_action(entity, subject_var):
             if 'anAction' in entity and isinstance(entity['anAction'], dict):
                 action_var = new_var("?action")
                 triples.append(self.triple(action_var, 'rdf:type', 'dul:Action'))
                 recursive_parse(entity['anAction'], action_var)
 
-        def handle_a_location(entity, subject_var):
             if 'aLocation' in entity and isinstance(entity['aLocation'], dict):
                 location_var = new_var("?location")
                 triples.append(self.triple(location_var, 'rdf:type', 'dul:Location'))
                 recursive_parse(entity['aLocation'], location_var)
 
-        #def handle_type(entity, subject_var):
-        #    if 'type' in entity and isinstance(entity['type'], str):
-        #        triples.append(self.triple(subject_var, 'rdf:type', entity['type']))
+            if 'type' in entity and isinstance(entity['type'], str):
+                triples.append(self.triple(subject_var, 'rdf:type', entity['type']))
 
-        def recursive_parse(entity, subject_var):
-            # Explicit ordered processing of known keys
-            ordered_handlers = [
-                handle_playsrole,
-                handle_has_participant_with_role,
-                handle_has_urdf_link,
-                handle_an_object,
-                handle_an_action,
-                handle_a_location,
-                handle_type
-            ]
-
-            for handler in ordered_handlers:
-                handler(entity, subject_var)
-
-            # Fallback for unknown nested dicts
             for key, value in entity.items():
-                if isinstance(value, dict) and key not in handled_keys:
+                if isinstance(value, dict) and key not in ['anObject', 'anAction', 'aLocation']:
                     recursive_parse(value, subject_var)
 
-        # Root-level key selection
+        # Determine root var type based on top-level key
         if 'anObject' in designator_as_json:
             root_var = new_var("?object")
+            #triples.append(self.triple(root_var, 'rdf:type', 'soma:PhysicalObject'))
             recursive_parse(designator_as_json['anObject'], root_var)
         elif 'anAction' in designator_as_json:
             root_var = new_var("?action")
@@ -517,10 +496,13 @@ class DesignatorParser:
             triples.append(self.triple(root_var, 'rdf:type', 'dul:Location'))
             recursive_parse(designator_as_json['aLocation'], root_var)
         else:
-            # throw error
-            raise ValueError("Designator JSON must contain 'anObject', 'anAction', or 'aLocation' at the root level.")
+            root_var = '?d'
+            triples.append(self.triple(root_var, 'rdf:type', 'SOMA:PyCramActionDesignator'))
+            recursive_parse(designator_as_json, root_var)
 
         return triples
+
+
         
 if __name__ == "__main__":
     import json
