@@ -21,7 +21,6 @@ from knowrob_designator.msg import (
     DesignatorQueryIncrementalFeedback
 )
 
-from knowrob import *
 from knowrob_ros.knowrob_ros_lib import KnowRobRosLib, TripleQueryBuilder, get_default_modalframe
 from knowrob_designator.designator_parser import DesignatorParser
 
